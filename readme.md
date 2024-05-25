@@ -12,3 +12,4 @@ https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install
 https://github.com/huggingface/notebooks/blob/main/diffusers/SDXL_DreamBooth_LoRA_.ipynb
 https://habr.com/ru/articles/766094/
 https://huggingface.co/docs/diffusers/using-diffusers/controlnet
+https://www.rabbitmq.com/tutorials/tutorial-two-python

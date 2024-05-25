@@ -1,0 +1,70 @@
+networks:
+  sd-bot:
+
+services:
+  api:
+    build: ./api
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - './api/app:/app'
+      - './storage:/storage'
+    restart: unless-stopped
+    ports:
+      - 8000:80
+    networks:
+      - sd-bot
+    environment:
+      - RABBITMQ_DEFAULT_USER=ann
+      - RABBITMQ_DEFAULT_PASS=2424
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_HOST=rabbitmq
+
+  model_service:
+    build: ./model_service
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - './model_service/app:/app'
+      - './storage:/storage'
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - sd-bot
+    environment:
+      - RABBITMQ_DEFAULT_USER=ann
+      - RABBITMQ_DEFAULT_PASS=2424
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_HOST=rabbitmq
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    hostname: rabbitmq
+    restart: always
+    # https://devops.stackexchange.com/questions/12092/docker-compose-healthcheck-for-rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    networks:
+      - sd-bot
+    environment:
+      - RABBITMQ_DEFAULT_USER=ann
+      - RABBITMQ_DEFAULT_PASS=2424
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    ports:
+      - 15672:15672
+
+volumes:
+  rabbitmq:
+    name: rabbitmq
