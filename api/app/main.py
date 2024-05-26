@@ -93,7 +93,7 @@ async def input_train(
     params = {
         "task": "model_train",
         "model_dir": str(model_dir), 
-        "promt": input_model.promt,
+        "prompt": input_model.promt,
         "model_name": input_model.name_of_model, 
         "type_person": input_model.gender
     }
@@ -116,7 +116,7 @@ async def input_inference(
     params = {
         "task": "model_inference",
         "model_dir": str(model_dir), 
-        "promt": input_model.promt,
+        "prompt": input_model.promt,
         "type_person": input_model.gender
     }
     publisher.send_message(params)

@@ -1,10 +1,14 @@
 import json
 import os
-
+import pathlib
 import pika
 
 import ControlNet
 import Lora
+
+APP_DIR = pathlib.Path(__file__).parent.resolve()
+HUGGINGFACE_CACHE_DIR = APP_DIR / "../storage/cache"
+HUGGINGFACE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Consumer:
@@ -36,7 +40,17 @@ class Consumer:
 
     def callback(self, channel, method, properties, body):
         params = json.loads(body)
-        print(params)
+
+        task = params.pop('task')
+
+        if task == 'model_train':
+            result = model_train(**params)
+        elif task == 'model_inference':
+            result = model_inference_Lora(**params)
+
+        # convert pathlib.Path objects to strings
+        result = [str(item.resolve()) for item in result]
+
         channel.basic_ack(delivery_tag=method.delivery_tag)
 
     def wait_messages(self):
@@ -46,19 +60,29 @@ class Consumer:
     def disconnect(self):
         if self.connection:
             self.channel.stop_consuming()
+            self.channel.close()
             self.connection.close()
         
         self.connection = None
         self.channel = None
 
 
-def model_train(model_dir: str, cache_dir: str, promt: str, model_name: str = 'Lora', type_person: str = 'women') -> list[str]:
+def model_train(model_dir: str, prompt: str, model_name: str = 'Lora', type_person: str = 'women') -> list[str]:
     if model_name == 'Lora':
-        instance = Lora.DreamBoth_LoRA(model_dir, cache_dir, promt, type_person)
+        instance = Lora.DreamBoth_LoRA(
+            model_dir=model_dir, 
+            cache_dir=HUGGINGFACE_CACHE_DIR, 
+            prompt=prompt, 
+            type_person=type_person
+        )
         instance.train()
         return instance.inference()
     elif model_name == 'ControlNet':
-        instance = ControlNet.ControlNet(model_dir, cache_dir, promt)
+        instance = ControlNet.ControlNet(
+            model_dir=model_dir, 
+            cache_dir=HUGGINGFACE_CACHE_DIR, 
+            prompt=prompt
+        )
         instance.get_model()
         return instance.generate()
     
