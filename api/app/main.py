@@ -97,11 +97,11 @@ async def input_train(
         "model_name": input_model.name_of_model, 
         "type_person": input_model.gender
     }
-    publisher.send_message(params)
+    generated_images = await publisher.send_message(params)
 
-    # return {
-    #     "generated_images": make_image_urls(request=request, fio=fio, generated_images=generated_images),
-    # }
+    return {
+        "generated_images": make_image_urls(request=request, fio=fio, generated_images=generated_images),
+    }
 
 
 @app.post("/input_inference/")
@@ -119,8 +119,8 @@ async def input_inference(
         "prompt": input_model.promt,
         "type_person": input_model.gender
     }
-    publisher.send_message(params)
+    generated_images = await publisher.send_message(params)
 
-    # return {
-    #     "generated_images": make_image_urls(request=request, fio=fio, generated_images=generated_images),
-    # }
+    return {
+        "generated_images": make_image_urls(request=request, fio=fio, generated_images=generated_images),
+    }

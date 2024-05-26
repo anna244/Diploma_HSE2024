@@ -50,11 +50,14 @@ class Consumer:
         # convert pathlib.Path objects to strings
         result = [str(item.resolve()) for item in result]
 
-        channel.basic_publish(exchange='',
-                     routing_key=properties.reply_to,
-                     properties=pika.BasicProperties(correlation_id = \
-                                                        properties.correlation_id),
-                     body=str(result))        
+        channel.basic_publish(
+            exchange='',
+            routing_key=properties.reply_to,
+            properties=pika.BasicProperties(
+                correlation_id=properties.correlation_id
+            ),
+            body=json.dumps(result)
+        )        
 
         channel.basic_ack(delivery_tag=method.delivery_tag)
 
