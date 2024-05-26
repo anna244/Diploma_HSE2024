@@ -1,6 +1,7 @@
-import pika
 import json
 import os
+
+import pika
 
 import ControlNet
 import Lora
@@ -12,27 +13,26 @@ class Consumer:
         self.channel = None
 
     def connect(self):
-        if self.connection:
-            return
-        
-        self.connection = pika.BlockingConnection(
-            pika.ConnectionParameters(
-                # https://pika.readthedocs.io/en/stable/intro.html#credentials
-                credentials=pika.PlainCredentials(
-                    os.environ.get('RABBITMQ_DEFAULT_USER'), 
-                    os.environ.get('RABBITMQ_DEFAULT_PASS')
-                ),
-                host=os.environ.get('RABBITMQ_HOST'),
-                port=os.environ.get('RABBITMQ_PORT')
+        if not self.connection or self.connection.is_closed:
+            self.connection = pika.BlockingConnection(
+                pika.ConnectionParameters(
+                    # https://pika.readthedocs.io/en/stable/intro.html#credentials
+                    credentials=pika.PlainCredentials(
+                        os.environ.get('RABBITMQ_DEFAULT_USER'), 
+                        os.environ.get('RABBITMQ_DEFAULT_PASS')
+                    ),
+                    host=os.environ.get('RABBITMQ_HOST'),
+                    port=os.environ.get('RABBITMQ_PORT')
+                )
             )
-        )
 
         self.create_channel()
-        self.wait_messages()
 
     def create_channel(self):
-        self.channel = self.connection.channel()
-        self.channel.queue_declare(queue='main', durable=True)
+        if not self.channel or self.channel.is_closed:
+            self.channel = self.connection.channel()
+            self.channel.queue_declare(queue='main', durable=True)
+            self.wait_messages()
 
     def callback(self, channel, method, properties, body):
         params = json.loads(body)

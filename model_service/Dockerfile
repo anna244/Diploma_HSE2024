@@ -15,7 +15,6 @@ RUN conda install -c conda-forge --yes --file requirements.txt && pip install co
 # Could not find the bitsandbytes CUDA binary at PosixPath('/opt/conda/lib/python3.12/site-packages/bitsandbytes/libbitsandbytes_cuda121.so')
 RUN pip install --upgrade --no-deps --force-reinstall numpy bitsandbytes git+https://github.com/huggingface/diffusers.git
 
-
 # переходим в директорию
 WORKDIR /app 
 

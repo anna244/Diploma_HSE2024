@@ -1,8 +1,8 @@
 #https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/controlnet.ipynb#scrollTo=wsv55Py8onJx
 import glob
+import os
 import pathlib
 from datetime import datetime
-import os
 
 import cv2
 import numpy as np
