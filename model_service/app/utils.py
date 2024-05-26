@@ -36,9 +36,8 @@ class Consumer:
         if not self.channel or self.channel.is_closed:
             self.channel = self.connection.channel()
             self.channel.queue_declare(queue='main', durable=True)
-            self.wait_messages()
 
-    def callback(self, channel, method, properties, body):
+    def on_request(self, channel, method, properties, body):
         params = json.loads(body)
 
         task = params.pop('task')
@@ -51,11 +50,17 @@ class Consumer:
         # convert pathlib.Path objects to strings
         result = [str(item.resolve()) for item in result]
 
+        channel.basic_publish(exchange='',
+                     routing_key=properties.reply_to,
+                     properties=pika.BasicProperties(correlation_id = \
+                                                        properties.correlation_id),
+                     body=str(result))        
+
         channel.basic_ack(delivery_tag=method.delivery_tag)
 
     def wait_messages(self):
-        self.channel.basic_consume(queue='main', on_message_callback=self.callback)
-        self.channel.start_consuming()       
+        self.channel.basic_consume(queue='main', on_message_callback=self.on_request)
+        self.channel.start_consuming()
        
     def disconnect(self):
         if self.connection:
