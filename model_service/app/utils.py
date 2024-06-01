@@ -12,9 +12,13 @@ HUGGINGFACE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Consumer:
+    # https://www.rabbitmq.com/tutorials/tutorial-two-python
+    # https://www.rabbitmq.com/tutorials/tutorial-six-python
+
     def __init__(self):
         self.connection = None
         self.channel = None
+        self.queue_name = 'main'
 
     def connect(self):
         if not self.connection or self.connection.is_closed:
@@ -35,7 +39,10 @@ class Consumer:
     def create_channel(self):
         if not self.channel or self.channel.is_closed:
             self.channel = self.connection.channel()
-            self.channel.queue_declare(queue='main', durable=True)
+            self.channel.queue_declare(
+                queue=self.queue_name, 
+                durable=True
+            )
 
     def on_request(self, channel, method, properties, body):
         params = json.loads(body)
@@ -62,7 +69,10 @@ class Consumer:
         channel.basic_ack(delivery_tag=method.delivery_tag)
 
     def wait_messages(self):
-        self.channel.basic_consume(queue='main', on_message_callback=self.on_request)
+        self.channel.basic_consume(
+            queue=self.queue_name, 
+            on_message_callback=self.on_request
+        )
         self.channel.start_consuming()
        
     def disconnect(self):
