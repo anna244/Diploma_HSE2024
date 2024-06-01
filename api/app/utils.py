@@ -15,22 +15,18 @@ class Publisher:
     def __init__(self):
         self.connection = None
         self.channel = None
+        self.loop = None
 
         self.result_queue = None
         self.result_consumer_tag = None
-        self.result_tasks = []
+        self.result_tasks = {}
         
         self.queue_name = 'main'
-        self.loop = asyncio.get_event_loop()
-
-    def __remove_future(
-        self, correlation_id: str,
-    ):
-        def do_remove(future: asyncio.Future):
-            self.futures.pop(correlation_id, None)
-        return do_remove
 
     async def connect(self):
+        if not self.loop:
+            self.loop = asyncio.get_event_loop()
+
         if not self.connection or self.connection.is_closed:
             self.connection = await aio_pika.connect_robust(
                 f"amqp://{os.environ.get('RABBITMQ_DEFAULT_USER')}:{os.environ.get('RABBITMQ_DEFAULT_PASS')}@{os.environ.get('RABBITMQ_HOST')}:{os.environ.get('RABBITMQ_PORT')}/?heartbeat=0",
@@ -44,7 +40,7 @@ class Publisher:
             self.channel = await self.connection.channel()
             await self.channel.declare_queue(self.queue_name, durable=True)
 
-            self.result_queue = await self.channel.declare_queue(queue=None, exclusive=True, auto_delete=True)
+            self.result_queue = await self.channel.declare_queue(None, exclusive=True, auto_delete=True)
 
             self.result_consumer_tag = await self.result_queue.consume(
                 self.on_response, 
@@ -56,34 +52,36 @@ class Publisher:
     def on_response(self, message):
         if message.correlation_id is None:
             return
-        future = self.futures.pop(message.correlation_id, None)
-        if future is None:
+        task = self.result_tasks.pop(message.correlation_id, None)
+        if task is None:
             return
-        payload = json.decode(message.body)
-        future.set_result(payload)
+        payload = json.loads(message.body)
+        task.set_result(payload)
 
     # https://stackoverflow.com/questions/50246304/using-python-decorators-to-retry-request
     @retry(stop=stop_after_attempt(3))
     async def send_message(self, payload):
         await self.connect()
 
-        future = self.loop.create_future()
+        task = self.loop.create_future()
         correlation_id = str(uuid.uuid4())
-        self.futures[correlation_id] = future
-        future.add_done_callback(self.__remove_future(correlation_id))
+        self.result_tasks[correlation_id] = task
+        task.add_done_callback(
+            lambda *args, **kwargs: self.result_tasks.pop(correlation_id, None)
+        )
 
         # https://github.com/mosquito/aio-pika/blob/master/aio_pika/patterns/rpc.py#L365
         await self.channel.default_exchange.publish(
             aio_pika.Message(
-                body=json.dumps(payload),
-                correlation_id=str(uuid.uuid4()),
+                body=json.dumps(payload, ensure_ascii=False).encode(),
+                correlation_id=correlation_id,
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                 reply_to=self.result_queue.name,
             ),
             routing_key=self.queue_name,
         )
         
-        return await future
+        return await task
         
     async def disconnect(self):
         for task in self.result_tasks.values():

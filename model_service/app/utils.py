@@ -48,14 +48,20 @@ class Consumer:
         params = json.loads(body)
 
         task = params.pop('task')
+        error = ''
+        result = None
 
-        if task == 'model_train':
-            result = model_train(**params)
-        elif task == 'model_inference':
-            result = model_inference_Lora(**params)
+        try:
+            if task == 'model_train':
+                result = model_train(**params)
+            elif task == 'model_inference':
+                result = model_inference_Lora(**params)
+        except Exception as e:
+            error = str(e)
 
         # convert pathlib.Path objects to strings
-        result = [str(item.resolve()) for item in result]
+        if result:
+            result = [str(item.resolve()) for item in result]
 
         channel.basic_publish(
             exchange='',
@@ -63,7 +69,10 @@ class Consumer:
             properties=pika.BasicProperties(
                 correlation_id=properties.correlation_id
             ),
-            body=json.dumps(result)
+            body=json.dumps({
+                'result': result,
+                'error': error
+            })
         )        
 
         channel.basic_ack(delivery_tag=method.delivery_tag)
@@ -105,6 +114,11 @@ def model_train(model_dir: str, prompt: str, model_name: str = 'Lora', type_pers
         return instance.generate()
     
 
-def model_inference_Lora(model_dir: str, promt: str, type_person: str = 'women') -> list[str]:
-    instance = Lora.DreamBoth_LoRA(model_dir, promt, type_person)
+def model_inference_Lora(model_dir: str, prompt: str, type_person: str = 'women') -> list[str]:
+    instance = Lora.DreamBoth_LoRA(
+        model_dir=model_dir, 
+        cache_dir=HUGGINGFACE_CACHE_DIR, 
+        prompt=prompt, 
+        type_person=type_person
+    )
     return instance.inference()

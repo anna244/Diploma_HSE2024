@@ -75,30 +75,30 @@ def get_directories(model_name: str, fio: str) -> tuple[str, str]:
     return model_dir, images_dir
 
 
-def make_image_urls(request: Request, fio: str, generated_images: list[pathlib.Path]) -> list[str]:
+def make_image_urls(request: Request, fio: str, generated_images: list[str]) -> list[str]:
     image_urls = []
-    user_static_path = pathlib.Path(STATIC_DIR) / fio  # 'app/storate/static/123/'
+    user_static_path = pathlib.Path(STATIC_DIR) / fio  # "app/storate/static/123/"
     user_static_path.mkdir(parents=True, exist_ok=True)
     for image_path in generated_images:
-        # image_path = pathlib.Path(image)
+        image_path = pathlib.Path(image_path)
 
         # перенести картинку из image_path в STATIC_DIR
-        new_image_name = image_path.name  # 'tatoo0.png'
-        new_image_path = user_static_path / new_image_name   # 'app/storate/static/123/tatoo0.png'
+        new_image_name = image_path.name  # "tatoo0.png"
+        new_image_path = user_static_path / new_image_name   # "app/storate/static/123/tatoo0.png"
 
         # не перезаписываем существующую картинку
         prefix = 0
         while new_image_path.exists():
             prefix += 1
-            new_image_name = f'{prefix}_{image_path.name}'
-            new_image_path = user_static_path / new_image_name  # 'app/storate/static/123/1_tatoo0.png'
+            new_image_name = f"{prefix}_{image_path.name}"
+            new_image_path = user_static_path / new_image_name  # "app/storate/static/123/1_tatoo0.png"
 
         image_path.rename(new_image_path)
 
         # формируем урл до картинки и записываем в ответ
         # https://www.starlette.io/routing/#reverse-url-lookups
         image_urls.append(
-            str(request.url_for("static", path=f'{fio}/{new_image_name}'))
+            str(request.url_for("static", path=f"{fio}/{new_image_name}"))
         )
     return image_urls
 
@@ -109,7 +109,7 @@ async def input_train(
     input_model: Annotated[InputTrain, Depends(InputTrain.as_form)],
     files: list[UploadFile], 
     request: Request
-):  
+) -> dict[str, str | list[str]]:  
     fio = translit(input_model.fio)
     model_dir, images_dir = get_directories(model_name=input_model.name_of_model.value, fio=fio)
 
@@ -125,10 +125,13 @@ async def input_train(
         "model_name": input_model.name_of_model, 
         "type_person": input_model.gender
     }
-    generated_images = await publisher.send_message(params)
+    result = await publisher.send_message(params)
+    generated_images = result.get("result") or []
+    error = result.get("error") or ""
 
     return {
         "generated_images": make_image_urls(request=request, fio=fio, generated_images=generated_images),
+        "error": error,
     }
 
 
@@ -136,10 +139,9 @@ async def input_train(
 async def input_inference(
     input_model:InputInference,
     request: Request
-):
-    
+) -> dict[str, str | list[str]]:
     fio = translit(input_model.fio)
-    model_dir, images_dir = get_directories(model_name=input_model.name_of_model.value, fio=fio)
+    model_dir, images_dir = get_directories(model_name=ModelName.Lora.value, fio=fio)
 
     params = {
         "task": "model_inference",
@@ -147,8 +149,11 @@ async def input_inference(
         "prompt": input_model.promt,
         "type_person": input_model.gender
     }
-    generated_images = await publisher.send_message(params)
+    result = await publisher.send_message(params)
+    generated_images = result.get("result") or []
+    error = result.get("error") or ""
 
     return {
         "generated_images": make_image_urls(request=request, fio=fio, generated_images=generated_images),
+        "error": error,
     }
