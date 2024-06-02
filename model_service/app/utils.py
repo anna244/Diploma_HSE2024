@@ -3,6 +3,8 @@ import os
 import pathlib
 import pika
 
+from tenacity import Retrying, RetryError, stop_after_attempt
+
 import ControlNet
 import Lora
 
@@ -30,7 +32,8 @@ class Consumer:
                         os.environ.get('RABBITMQ_DEFAULT_PASS')
                     ),
                     host=os.environ.get('RABBITMQ_HOST'),
-                    port=os.environ.get('RABBITMQ_PORT')
+                    port=os.environ.get('RABBITMQ_PORT'),
+                    heartbeat=0
                 )
             )
 
@@ -63,17 +66,22 @@ class Consumer:
         if result:
             result = [str(item.resolve()) for item in result]
 
-        channel.basic_publish(
-            exchange='',
-            routing_key=properties.reply_to,
-            properties=pika.BasicProperties(
-                correlation_id=properties.correlation_id
-            ),
-            body=json.dumps({
-                'result': result,
-                'error': error
-            })
-        )        
+        try:
+            for attempt in Retrying(stop=stop_after_attempt(3)):
+                with attempt:
+                    channel.basic_publish(
+                        exchange='',
+                        routing_key=properties.reply_to,
+                        properties=pika.BasicProperties(
+                            correlation_id=properties.correlation_id
+                        ),
+                        body=json.dumps({
+                            'result': result,
+                            'error': error
+                        })
+                    )
+        except RetryError as e:
+            print(e)
 
         channel.basic_ack(delivery_tag=method.delivery_tag)
 
