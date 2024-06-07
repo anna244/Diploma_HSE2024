@@ -44,6 +44,7 @@ services:
       - RABBITMQ_DEFAULT_PASS=2424
       - RABBITMQ_PORT=5672
       - RABBITMQ_HOST=rabbitmq
+      - HF_HOME=/storage/cache
 
   rabbitmq:
     image: rabbitmq:3.13-management
