@@ -1,18 +1,25 @@
 import asyncio
+import io
 import logging
+import mimetypes
 import os
 
+import aiohttp
+import magic
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup, default_state
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import (BotCommand, CallbackQuery, InlineKeyboardButton,
-                           InlineKeyboardMarkup, KeyboardButton, Message,
-                           PhotoSize, ReplyKeyboardMarkup, ReplyKeyboardRemove)
+from aiogram.types import (BotCommand, BufferedInputFile, CallbackQuery,
+                           InlineKeyboardButton, InlineKeyboardMarkup,
+                           InputMediaPhoto, KeyboardButton, Message, PhotoSize,
+                           ReplyKeyboardMarkup, ReplyKeyboardRemove)
+from aiogram.utils.media_group import MediaGroupBuilder
 
 # полученный у @BotFather
 BOT_TOKEN = os.environ.get('TGBOT_API_TOKEN')
+API_URL = os.environ.get('API_URL', 'http://localhost:8000')
 
 # Инициализируем хранилище (создаем экземпляр класса MemoryStorage)
 storage = MemoryStorage()
@@ -29,13 +36,22 @@ dp = Dispatcher(storage=storage)
 # # Создаем "базу данных" пользователей
 user_dict: dict[int, dict[str, str | int | bool]] = {}
 
+# Пример данных в словаре
+# {
+#     411554990: {
+#         'gender': 'women', 
+#         'photo_unique_id': 'AQADTtkxGwABwDlLfQ', 
+#         'photo_id': 'AgACAgIAAxkBAAPQZmcYwAEbDJ4wBE-XkXQiFikqVbEAAk7ZMRsAAcA5S5pnKfoNAAGLLwEAAwIAA3gAAzUE', 
+#         'promt': 'your_promt'
+#     }
+# }
+
 # Cоздаем класс, наследуемый от StatesGroup, для группы состояний нашей FSM
 class FSMFillForm(StatesGroup):
     # Создаем экземпляры класса State, последовательно
     # перечисляя возможные состояния, в которых будет находиться
     # бот в разные моменты взаимодействия с пользователем
     files = State()        # Состояние ожидания ввода изображений
-    fio = State()         # Состояние ожидания ввода fio
     gender = State()      # Состояние ожидания выбора пола
     promt= State()     # Состояние ожидания загрузки текста
 
@@ -64,7 +80,7 @@ async def cmd_start(message: types.Message):
     )
 
     await message.answer(
-        text = "Привет! Я - бот, который умеет обучать ControlNet и LoRA на твоих данных",
+        text = 'Привет! Я - бот, который умеет обучать ControlNet и LoRA на твоих данных',
         reply_markup=keyboard
     )
    
@@ -81,23 +97,11 @@ async def process_cancel_command_state(message: Message, state: FSMContext):
     # Сбрасываем состояние и очищаем данные, полученные внутри состояний
     await state.clear()
     
+
 #-----------------------------------------------------------------------------------------
 # Этот хэндлер будет срабатывать на ответ "ControlNet" 
 @dp.message(F.text == 'ControlNet', StateFilter(default_state))
 async def process_ControlNet_answer(message: Message, state: FSMContext):
-    await message.answer(
-        text='Введите ваше fio',
-        reply_markup=ReplyKeyboardRemove()
-    )
-    await state.set_state(FSMFillForm.fio)
-
-
-# Этот хэндлер будет срабатывать, если введен корректный fio
-# и переводить в состояние выбора пола
-@dp.message(StateFilter(FSMFillForm.fio))
-async def process_fio_sent(message: Message, state: FSMContext):
-    # Cохраняем имя в хранилище по ключу "fio"
-    await state.update_data(fio=message.text)
     # Создаем объекты инлайн-кнопок
     male_button = InlineKeyboardButton(
         text='women',
@@ -121,6 +125,7 @@ async def process_fio_sent(message: Message, state: FSMContext):
     )
     # Устанавливаем состояние ожидания выбора пола
     await state.set_state(FSMFillForm.gender)
+
 
 # Этот хэндлер будет срабатывать на нажатие кнопки при
 # выборе пола и переводить в состояние отправки фото
@@ -191,14 +196,52 @@ async def process_promt_sent(message: Message, state: FSMContext):
     await state.update_data(promt=message.text)
     # Добавляем в "базу данных" анкету пользователя
     # по ключу id пользователя
-    user_dict[message.from_user.id] = await state.get_data()
+    data = await state.get_data()
+    user_dict[message.from_user.id] = data
     # Завершаем машину состояний
     await state.clear()
     # Отправляем в чат сообщение о выходе из машины состояний
     await message.answer(
-        text='Спасибо! Ваши данные сохранены!\n\n'
+        text='Спасибо! Ваши данные сохранены! Пришлем результат когда все будет готово\n\n'
     )
 
+    # https://docs.aiogram.dev/en/latest/api/download_file.html
+    file = await bot.download(data['photo_id'])
+    file.seek(0)
+    file_format = magic.from_buffer(file.read(2048), True)
+    file.seek(0)
+    file_extension = mimetypes.guess_extension(file_format) or '.jpg'
+    
+    async with aiohttp.ClientSession() as session:
+        request_data = aiohttp.FormData()
+        request_data.add_field('files', file, filename=f'{data["photo_unique_id"]}{file_extension}')
+        request_data.add_field('fio', f'telegram_{message.from_user.id}')
+        request_data.add_field('gender', data['gender'])
+        request_data.add_field('name_of_model', 'ControlNet')
+        request_data.add_field('promt', data['promt'])
+
+        generated_image_urls = []
+        request = session.post(f'{API_URL}/input_train/', data=request_data)
+        async with request as resp:
+            server_response = await resp.json()
+            generated_image_urls = server_response['generated_images']
+        
+        # https://docs.aiogram.dev/en/latest/utils/media_group.html#usage
+        # https://stackoverflow.com/questions/78285221/send-multiple-photos-with-text-aiogram
+        media_group = MediaGroupBuilder(caption='Результат')
+        for item in generated_image_urls:
+            async with session.get(url=item) as response:
+                response.auto_decompress = False
+                buffer = io.BytesIO(await response.read())
+                buffer.seek(0)
+                # convert http://localhost:8000/static/telegram_411554990/tatto1.png to telegram_411554990_tatto1.png
+                caption = '_'.join(item.split('/')[-2:])
+                # https://docs.aiogram.dev/en/latest/api/upload_file.html#upload-from-buffer
+                media = BufferedInputFile(buffer.read(), filename=caption)
+                media_group.add(type='photo', media=media)
+
+        await bot.send_media_group(chat_id=message.chat.id, media=media_group.build())
+    
 
 # Этот хэндлер будет срабатывать, если во время отправки Promt
 # будет введено/отправлено что-то некорректное
@@ -209,6 +252,8 @@ async def warning_not_promt(message: Message):
              'Если вы хотите прервать заполнение анкеты - '
              'отправьте команду /cancel'
     )
+
+
 #--------------------------------------------------------------------------------------------------------------    
 # Этот хэндлер будет срабатывать на любые сообщения в состоянии "по умолчанию",
 # кроме тех, для которых есть отдельные хэндлеры
@@ -216,20 +261,11 @@ async def warning_not_promt(message: Message):
 async def send_echo(message: Message):
     await message.reply(text='Извините, не понимаю')
 
-# @dp.message(StateFilter(default_state))
-# async def process_sent(message: Message):
-#     print(await message.get_data())
-#     print(await message.get_state())
-
 
 # Запуск процесса поллинга новых апдейтов
 async def main():
     await set_main_menu(bot)
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())
-
-
-print(user_dict)
-

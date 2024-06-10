@@ -4,6 +4,7 @@ networks:
 services:
   api:
     build: ./api
+    user: "${UID}:${GID}"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -23,6 +24,7 @@ services:
 
   model_service:
     build: ./model_service
+    user: "${UID}:${GID}"
     depends_on:
       rabbitmq:
         condition: service_healthy

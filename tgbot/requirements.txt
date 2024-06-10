@@ -1,1 +1,2 @@
 aiogram==3.7.0
+python-magic==0.4.27
