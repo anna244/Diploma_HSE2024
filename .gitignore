@@ -2,3 +2,4 @@ __pycache__
 /storage
 /private
 /tgbot/storage
+/tgbot/.env

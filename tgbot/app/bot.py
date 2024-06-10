@@ -1,15 +1,18 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher, types, F
+import os
+
+from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart, StateFilter
-from aiogram.fsm.state import default_state, State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from aiogram.types import (BotCommand, KeyboardButton, Message, ReplyKeyboardMarkup,
-                            ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, PhotoSize)
+from aiogram.fsm.state import State, StatesGroup, default_state
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import (BotCommand, CallbackQuery, InlineKeyboardButton,
+                           InlineKeyboardMarkup, KeyboardButton, Message,
+                           PhotoSize, ReplyKeyboardMarkup, ReplyKeyboardRemove)
 
 # полученный у @BotFather
-BOT_TOKEN = ''
+BOT_TOKEN = os.environ.get('TGBOT_API_TOKEN')
 
 # Инициализируем хранилище (создаем экземпляр класса MemoryStorage)
 storage = MemoryStorage()
@@ -19,6 +22,7 @@ logging.basicConfig(level=logging.INFO)
 
 # Объект бота
 bot = Bot(token=BOT_TOKEN)
+
 # Диспетчер
 dp = Dispatcher(storage=storage)
 
@@ -76,7 +80,7 @@ async def process_cancel_command_state(message: Message, state: FSMContext):
     )
     # Сбрасываем состояние и очищаем данные, полученные внутри состояний
     await state.clear()
-
+    
 #-----------------------------------------------------------------------------------------
 # Этот хэндлер будет срабатывать на ответ "ControlNet" 
 @dp.message(F.text == 'ControlNet', StateFilter(default_state))

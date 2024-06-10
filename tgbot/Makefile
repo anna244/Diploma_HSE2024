@@ -6,7 +6,7 @@ build:
 		--mount type=bind,source="$(shell pwd)/app",target=/app \
 	    -v $(shell pwd)/storage:/storage \
 		-u $(shell id -u ${USER}):$(shell id -g ${USER}) \
-	    -e API_URL="http://localhost:8000" \
+		--env-file .env
 		--network host \
 		-it tgbot
 
