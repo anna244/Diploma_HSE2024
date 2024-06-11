@@ -34,7 +34,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
 # # Создаем "базу данных" пользователей
-user_dict: dict[int, dict[str, str | int | bool]] = {}
+# user_dict: dict[int, dict[str, str | int | bool]] = {}
 
 # Пример данных в словаре
 # {
@@ -51,6 +51,7 @@ class FSMFillForm(StatesGroup):
     # Создаем экземпляры класса State, последовательно
     # перечисляя возможные состояния, в которых будет находиться
     # бот в разные моменты взаимодействия с пользователем
+    name_of_model = State()
     files = State()        # Состояние ожидания ввода изображений
     gender = State()      # Состояние ожидания выбора пола
     promt= State()     # Состояние ожидания загрузки текста
@@ -70,7 +71,7 @@ async def set_main_menu(bot: Bot):
 async def cmd_start(message: types.Message):
     # Создаем объекты кнопок
     button_1 = KeyboardButton(text='ControlNet')
-    button_2 = KeyboardButton(text='Lora_train')
+    button_2 = KeyboardButton(text='Lora')
     button_3 = KeyboardButton(text='Lora_inference')
 
     # Создаем объект клавиатуры, добавляя в него кнопки
@@ -100,8 +101,11 @@ async def process_cancel_command_state(message: Message, state: FSMContext):
 
 #-----------------------------------------------------------------------------------------
 # Этот хэндлер будет срабатывать на ответ "ControlNet" 
-@dp.message(F.text == 'ControlNet', StateFilter(default_state))
+# https://docs.aiogram.dev/en/latest/dispatcher/filters/magic_filters.html
+@dp.message(F.text.in_({'ControlNet', 'Lora'}), StateFilter(default_state))
 async def process_ControlNet_answer(message: Message, state: FSMContext):
+    await state.update_data(name_of_model=message.text)
+
     # Создаем объекты инлайн-кнопок
     male_button = InlineKeyboardButton(
         text='women',
@@ -109,7 +113,7 @@ async def process_ControlNet_answer(message: Message, state: FSMContext):
     )
     female_button = InlineKeyboardButton(
         text='men',
-             callback_data='men'
+        callback_data='men'
     )
 
     # Добавляем кнопки в клавиатуру (две в одном ряду )
@@ -120,8 +124,12 @@ async def process_ControlNet_answer(message: Message, state: FSMContext):
     markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
     # Отправляем пользователю сообщение с клавиатурой
     await message.answer(
-        text='Спасибо!\n\nУкажите ваш пол',
-        reply_markup=markup
+        text='Спасибо!',
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    await message.answer(
+        text='Укажите ваш пол',
+        reply_markup=markup,
     )
     # Устанавливаем состояние ожидания выбора пола
     await state.set_state(FSMFillForm.gender)
@@ -165,14 +173,27 @@ async def process_photo_sent(message: Message,
                              largest_photo: PhotoSize):
     # Cохраняем данные фото (file_unique_id и file_id) в хранилище
     # по ключам "photo_unique_id" и "photo_id"
+    is_empty = False
+    data = await state.get_data()
+    files = data.get('files')
+    if not files:
+        is_empty = True
+        files = {}
+    files[largest_photo.file_unique_id] = {
+        'photo_unique_id': largest_photo.file_unique_id,
+        'photo_id': largest_photo.file_id
+    }
     await state.update_data(
-        photo_unique_id=largest_photo.file_unique_id,
-        photo_id=largest_photo.file_id
+        files=files
     )
-    await message.answer(
-        text='Введите свой promt',
-        reply_markup=ReplyKeyboardRemove()
-    )
+
+    # Если обрабатываем первую фотографию
+    if is_empty:
+        await message.answer(
+            text='Введите свой promt',
+            reply_markup=ReplyKeyboardRemove()
+        )
+
     # Устанавливаем состояние ожидания выбора образования
     await state.set_state(FSMFillForm.promt)
 
@@ -197,28 +218,28 @@ async def process_promt_sent(message: Message, state: FSMContext):
     # Добавляем в "базу данных" анкету пользователя
     # по ключу id пользователя
     data = await state.get_data()
-    user_dict[message.from_user.id] = data
+    # user_dict[message.from_user.id] = data
     # Завершаем машину состояний
     await state.clear()
     # Отправляем в чат сообщение о выходе из машины состояний
     await message.answer(
         text='Спасибо! Ваши данные сохранены! Пришлем результат когда все будет готово\n\n'
     )
-
-    # https://docs.aiogram.dev/en/latest/api/download_file.html
-    file = await bot.download(data['photo_id'])
-    file.seek(0)
-    file_format = magic.from_buffer(file.read(2048), True)
-    file.seek(0)
-    file_extension = mimetypes.guess_extension(file_format) or '.jpg'
     
     async with aiohttp.ClientSession() as session:
         request_data = aiohttp.FormData()
-        request_data.add_field('files', file, filename=f'{data["photo_unique_id"]}{file_extension}')
         request_data.add_field('fio', f'telegram_{message.from_user.id}')
         request_data.add_field('gender', data['gender'])
-        request_data.add_field('name_of_model', 'ControlNet')
+        request_data.add_field('name_of_model', data['name_of_model'])
         request_data.add_field('promt', data['promt'])
+
+        for fille_data in data['files'].values():
+            # https://docs.aiogram.dev/en/latest/api/download_file.html
+            file = await bot.download(fille_data['photo_id'])
+            file_format = magic.from_buffer(file.read(2048), True)
+            file.seek(0)
+            file_extension = mimetypes.guess_extension(file_format) or '.jpg'
+            request_data.add_field('files', file, filename=f'{fille_data["photo_unique_id"]}{file_extension}')
 
         generated_image_urls = []
         request = session.post(f'{API_URL}/input_train/', data=request_data)
