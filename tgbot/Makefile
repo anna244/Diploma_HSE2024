@@ -6,9 +6,12 @@ build:
 		--mount type=bind,source="$(shell pwd)/app",target=/app \
 	    -v $(shell pwd)/storage:/storage \
 		-u $(shell id -u ${USER}):$(shell id -g ${USER}) \
-		--env-file .env
+		--env-file .env \
 		--network host \
 		-it tgbot
 
 start:
+	docker start tgbot
+
+stop:
 	docker start tgbot

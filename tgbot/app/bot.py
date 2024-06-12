@@ -56,6 +56,12 @@ class FSMFillForm(StatesGroup):
     gender = State()      # Состояние ожидания выбора пола
     promt= State()     # Состояние ожидания загрузки текста
 
+
+class FSMInferenceForm(StatesGroup):
+    gender = State()      # Состояние ожидания выбора пола
+    promt= State()     # Состояние ожидания загрузки текста
+
+
 # Функция для настройки кнопки Menu бота
 async def set_main_menu(bot: Bot):
     main_menu_commands = [
@@ -211,7 +217,7 @@ async def warning_not_photo(message: Message):
 
 # Этот хэндлер будет срабатывать на ввод promt
 # выводить из машины состояний
-@dp.message(StateFilter(FSMFillForm.promt), F.text.isalpha())
+@dp.message(StateFilter(FSMFillForm.promt))
 async def process_promt_sent(message: Message, state: FSMContext):
     # Cохраняем имя в хранилище по ключу "promt"
     await state.update_data(promt=message.text)
@@ -226,7 +232,8 @@ async def process_promt_sent(message: Message, state: FSMContext):
         text='Спасибо! Ваши данные сохранены! Пришлем результат когда все будет готово\n\n'
     )
     
-    async with aiohttp.ClientSession() as session:
+    timeout = aiohttp.ClientTimeout(total=3600)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         request_data = aiohttp.FormData()
         request_data.add_field('fio', f'telegram_{message.from_user.id}')
         request_data.add_field('gender', data['gender'])
@@ -245,37 +252,148 @@ async def process_promt_sent(message: Message, state: FSMContext):
         request = session.post(f'{API_URL}/input_train/', data=request_data)
         async with request as resp:
             server_response = await resp.json()
+            if 'generated_images' not in server_response:
+                await message.answer(
+                    text=f'Не могу найти картинки в результатах\n\n{str(server_response)}\n\n'
+                )
+
             generated_image_urls = server_response['generated_images']
         
         # https://docs.aiogram.dev/en/latest/utils/media_group.html#usage
         # https://stackoverflow.com/questions/78285221/send-multiple-photos-with-text-aiogram
-        media_group = MediaGroupBuilder(caption='Результат')
-        for item in generated_image_urls:
-            async with session.get(url=item) as response:
-                response.auto_decompress = False
-                buffer = io.BytesIO(await response.read())
-                buffer.seek(0)
-                # convert http://localhost:8000/static/telegram_411554990/tatto1.png to telegram_411554990_tatto1.png
-                caption = '_'.join(item.split('/')[-2:])
-                # https://docs.aiogram.dev/en/latest/api/upload_file.html#upload-from-buffer
-                media = BufferedInputFile(buffer.read(), filename=caption)
-                media_group.add(type='photo', media=media)
+        if generated_image_urls:
+            media_group = MediaGroupBuilder(caption='Результат')
+            for item in generated_image_urls:
+                async with session.get(url=item) as response:
+                    response.auto_decompress = False
+                    buffer = io.BytesIO(await response.read())
+                    buffer.seek(0)
+                    # convert http://localhost:8000/static/telegram_411554990/tatto1.png to telegram_411554990_tatto1.png
+                    caption = '_'.join(item.split('/')[-2:])
+                    # https://docs.aiogram.dev/en/latest/api/upload_file.html#upload-from-buffer
+                    media = BufferedInputFile(buffer.read(), filename=caption)
+                    media_group.add(type='photo', media=media)
 
-        await bot.send_media_group(chat_id=message.chat.id, media=media_group.build())
-    
-
-# Этот хэндлер будет срабатывать, если во время отправки Promt
-# будет введено/отправлено что-то некорректное
-@dp.message(StateFilter(FSMFillForm.promt))
-async def warning_not_promt(message: Message):
-    await message.answer(
-        text='Пожалуйста, напишите корректный promt!\n\n'
-             'Если вы хотите прервать заполнение анкеты - '
-             'отправьте команду /cancel'
-    )
+            await bot.send_media_group(chat_id=message.chat.id, media=media_group.build())
 
 
 #--------------------------------------------------------------------------------------------------------------    
+# Этот хэндлер будет срабатывать на ответ "Lora_inference" 
+@dp.message(F.text == 'Lora_inference', StateFilter(default_state))
+async def process_Lora_inference_answer(message: Message, state: FSMContext):
+    await state.update_data(name_of_model=message.text)
+
+    # Создаем объекты инлайн-кнопок
+    male_button = InlineKeyboardButton(
+        text='women',
+        callback_data='women'
+    )
+    female_button = InlineKeyboardButton(
+        text='men',
+        callback_data='men'
+    )
+
+    # Добавляем кнопки в клавиатуру (две в одном ряду )
+    keyboard: list[list[InlineKeyboardButton]] = [
+        [male_button, female_button]
+    ]
+    # Создаем объект инлайн-клавиатуры
+    markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+    # Отправляем пользователю сообщение с клавиатурой
+    await message.answer(
+        text='Спасибо!',
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    await message.answer(
+        text='Укажите ваш пол',
+        reply_markup=markup,
+    )
+    # Устанавливаем состояние ожидания выбора пола
+    await state.set_state(FSMInferenceForm.gender)
+
+
+# Этот хэндлер будет срабатывать на нажатие кнопки при
+# выборе пола и переводить в состояние отправки фото
+@dp.callback_query(StateFilter(FSMInferenceForm.gender),
+                   F.data.in_(['women', 'men']))
+async def process_gender_press(callback: CallbackQuery, state: FSMContext):
+    # Cохраняем пол (callback.data нажатой кнопки) в хранилище,
+    # по ключу "gender"
+    await state.update_data(gender=callback.data)
+    # Удаляем сообщение с кнопками, потому что следующий этап - загрузка promt
+    # чтобы у пользователя не было желания тыкать кнопки
+    await callback.message.delete()
+    await callback.message.answer(
+        text='Спасибо! А теперь введите свой promt'
+    )
+    # Устанавливаем состояние ожидания загрузки promt
+    await state.set_state(FSMInferenceForm.promt)
+
+
+# Этот хэндлер будет срабатывать, если во время выбора пола
+# будет введено/отправлено что-то некорректное
+@dp.message(StateFilter(FSMInferenceForm.gender))
+async def warning_not_gender(message: Message):
+    await message.answer(
+        text='Пожалуйста, пользуйтесь кнопками '
+             'при выборе пола\n\nЕсли вы хотите прервать '
+             'заполнение анкеты - отправьте команду /cancel'
+    )
+
+# Этот хэндлер будет срабатывать на ввод promt
+# выводить из машины состояний
+@dp.message(StateFilter(FSMInferenceForm.promt))
+async def process_promt_sent(message: Message, state: FSMContext):
+    # Cохраняем имя в хранилище по ключу "promt"
+    await state.update_data(promt=message.text)
+    # Добавляем в "базу данных" анкету пользователя
+    # по ключу id пользователя
+    data = await state.get_data()
+    # user_dict[message.from_user.id] = data
+    # Завершаем машину состояний
+    await state.clear()
+    # Отправляем в чат сообщение о выходе из машины состояний
+    await message.answer(
+        text='Спасибо! Ваши данные сохранены! Пришлем результат когда все будет готово\n\n'
+    )
+    
+    timeout = aiohttp.ClientTimeout(total=3600)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        generated_image_urls = []
+        request = session.post(f'{API_URL}/input_inference/', json={
+            'fio': f'telegram_{message.from_user.id}',
+            'gender': data['gender'],
+            'promt': data['promt'],
+        })
+        async with request as resp:
+            server_response = await resp.json()
+            if 'generated_images' not in server_response:
+                await message.answer(
+                    text=f'Не могу найти картинки в результатах\n\n{str(server_response)}\n\n'
+                )
+                return
+
+            generated_image_urls = server_response['generated_images']
+        
+        # https://docs.aiogram.dev/en/latest/utils/media_group.html#usage
+        # https://stackoverflow.com/questions/78285221/send-multiple-photos-with-text-aiogram
+        if generated_image_urls:
+            media_group = MediaGroupBuilder(caption='Результат')
+            for item in generated_image_urls:
+                async with session.get(url=item) as response:
+                    response.auto_decompress = False
+                    buffer = io.BytesIO(await response.read())
+                    buffer.seek(0)
+                    # convert http://localhost:8000/static/telegram_411554990/tatto1.png to telegram_411554990_tatto1.png
+                    caption = '_'.join(item.split('/')[-2:])
+                    # https://docs.aiogram.dev/en/latest/api/upload_file.html#upload-from-buffer
+                    media = BufferedInputFile(buffer.read(), filename=caption)
+                    media_group.add(type='photo', media=media)
+
+            await bot.send_media_group(chat_id=message.chat.id, media=media_group.build())
+
+
+#--------------------------------------------------------------------------------------------------------------  
 # Этот хэндлер будет срабатывать на любые сообщения в состоянии "по умолчанию",
 # кроме тех, для которых есть отдельные хэндлеры
 @dp.message(StateFilter(default_state))

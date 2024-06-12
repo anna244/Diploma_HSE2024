@@ -67,10 +67,14 @@ class InputInference(BaseModel):
     
 
 # /{datetime.datetime.now():%Y.%m.%d_%H.%M.%S}
-def get_directories(model_name: str, fio: str) -> tuple[str, str]:
+def get_directories(model_name: str, fio: str, clear_image_dir: bool = False) -> tuple[str, str]:
     model_dir = STORAGE_DIR / f"content_{model_name}/{fio}"
     images_dir = model_dir / "data"
     images_dir.mkdir(parents=True, exist_ok=True)
+
+    if clear_image_dir:
+        for file in images_dir.rglob('*'):
+            file.unlink()
 
     return model_dir, images_dir
 
@@ -111,7 +115,11 @@ async def input_train(
     request: Request
 ) -> dict[str, str | list[str]]:  
     fio = translit(input_model.fio)
-    model_dir, images_dir = get_directories(model_name=input_model.name_of_model.value, fio=fio)
+    model_dir, images_dir = get_directories(
+        model_name=input_model.name_of_model.value, 
+        fio=fio, 
+        clear_image_dir=True
+    )
 
     for file in files:
         async with aiofiles.open (images_dir/file.filename, "wb") as out_file:
@@ -141,7 +149,10 @@ async def input_inference(
     request: Request
 ) -> dict[str, str | list[str]]:
     fio = translit(input_model.fio)
-    model_dir, images_dir = get_directories(model_name=ModelName.Lora.value, fio=fio)
+    model_dir, images_dir = get_directories(
+        model_name=ModelName.Lora.value, 
+        fio=fio
+    )
 
     params = {
         "task": "model_inference",
