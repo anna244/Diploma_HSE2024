@@ -130,8 +130,8 @@ async def input_train(
         "task": "model_train",
         "model_dir": str(model_dir), 
         "prompt": input_model.promt,
-        "model_name": input_model.name_of_model, 
-        "type_person": input_model.gender
+        "model_name": input_model.name_of_model.value, 
+        "type_person": input_model.gender.value
     }
     result = await publisher.send_message(params)
     generated_images = result.get("result") or []
@@ -158,7 +158,7 @@ async def input_inference(
         "task": "model_inference",
         "model_dir": str(model_dir), 
         "prompt": input_model.promt,
-        "type_person": input_model.gender
+        "type_person": input_model.gender.value
     }
     result = await publisher.send_message(params)
     generated_images = result.get("result") or []
